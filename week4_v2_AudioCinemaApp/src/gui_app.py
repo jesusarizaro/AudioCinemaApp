@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 import tkinter as tk
+
+import matplotlib
+matplotlib.use("TkAgg")
+
 from tkinter import ttk, messagebox, filedialog
 from pathlib import Path
 import json
