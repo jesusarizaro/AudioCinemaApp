@@ -13,7 +13,7 @@ from ttkbootstrap.constants import *
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 
-from platform import APP_DIR, REP_DIR, ensure_dirs
+from app_platform import APP_DIR, REP_DIR, ensure_dirs
 from configio import load_config, save_config
 from analyzer import (pick_input_device, record, load_ref, analyze_pair,
                       build_json, BANDS)
