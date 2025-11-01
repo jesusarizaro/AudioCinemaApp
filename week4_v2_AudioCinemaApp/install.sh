@@ -10,33 +10,33 @@ PNG_SRC="${APP_DIR}/assets/audiocinema.png"
 ICO_DST="${APP_DIR}/assets/audiocinema.ico"
 
 echo "[1/3] Creando entorno Python…"
+# Dependencias del sistema necesarias para GUI/audio/numpy/matplotlib
+sudo apt update
+sudo apt install -y \
+  libportaudio2 libsndfile1 ffmpeg \
+  python3-tk tk fonts-dejavu-core \
+  imagemagick
+
 command -v python3 >/dev/null || { echo "Python3 no encontrado"; exit 1; }
 python3 -m venv "${APP_DIR}/venv"
 "${PIP}" install --upgrade pip wheel
 "${PIP}" install -r "${REQ}"
 
 echo "[2/3] Generando instalador (iconos, menú y systemd)…"
-if ! command -v convert >/dev/null 2>&1; then
-  echo "  (Opcional) Instala ImageMagick para .ico: sudo apt install -y imagemagick"
-else
-  if [ -f "${PNG_SRC}" ]; then
-    convert "${PNG_SRC}" "${ICO_DST}" || true
-    echo "  ICO generado en ${ICO_DST}"
-  fi
+# ICO opcional
+if command -v convert >/dev/null 2>&1 && [ -f "${PNG_SRC}" ]; then
+  convert "${PNG_SRC}" "${ICO_DST}" || true
 fi
 
+# Iconos del sistema
 sudo mkdir -p /usr/share/pixmaps
-if [ -f "${PNG_SRC}" ]; then
-  sudo cp "${PNG_SRC}" /usr/share/pixmaps/audiocinema.png
-fi
-
+[ -f "${PNG_SRC}" ] && sudo cp "${PNG_SRC}" /usr/share/pixmaps/audiocinema.png
 mkdir -p "${HOME}/.local/share/icons/hicolor/256x256/apps"
-if [ -f "${PNG_SRC}" ]; then
-  cp "${PNG_SRC}" "${HOME}/.local/share/icons/hicolor/256x256/apps/audiocinema.png"
-fi
+[ -f "${PNG_SRC}" ] && cp "${PNG_SRC}" "${HOME}/.local/share/icons/hicolor/256x256/apps/audiocinema.png"
 update-icon-theme 2>/dev/null || true
 sudo update-icon-caches /usr/share/icons/hicolor 2>/dev/null || true
 
+# Entrada de menú
 mkdir -p "${HOME}/.local/share/applications"
 cat > "${HOME}/.local/share/applications/audiocinema.desktop" <<EOF
 [Desktop Entry]
@@ -52,6 +52,7 @@ StartupWMClass=AudioCinema
 EOF
 update-desktop-database "${HOME}/.local/share/applications" 2>/dev/null || true
 
+# Setup mínimo
 "${PY}" "${APP_DIR}/src/main.py" --setup || true
 
 echo "[3/3] Verificación…"
