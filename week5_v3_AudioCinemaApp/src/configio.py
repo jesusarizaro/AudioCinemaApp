@@ -1,46 +1,49 @@
 #!/usr/bin/env python3
-from pathlib import Path
+from __future__ import annotations
 import yaml
-from app_platform import CFG_DIR, ASSETS_DIR
+from pathlib import Path
+from typing import Any, Dict
+from app_platform import CFG_DIR, ensure_dirs, APP_DIR
 
-CFG_PATH = CFG_DIR / "config.yaml"
+CFG_FILE = CFG_DIR / "config.yaml"
 
-DEFAULTS = {
-    "oncalendar": "*-*-* 02:00:00",
-    "thingsboard": {
-        "host": "thingsboard.cloud",
-        "port": 1883,
-        "use_tls": False,
-        "token": "REEMPLAZA_TU_TOKEN"
+_DEFAULTS: Dict[str, Any] = {
+    "reference": {
+        # apunta a un wav dentro de assets por defecto
+        "wav_path": str((APP_DIR / "assets" / "reference.wav").absolute())
     },
     "audio": {
         "fs": 48000,
         "duration_s": 10.0,
         "preferred_input_name": ""
     },
-    "reference": {
-        "wav_path": str((ASSETS_DIR / "reference.wav").resolve())
+    "thingsboard": {
+        "host": "thingsboard.cloud",
+        "port": 1883,
+        "use_tls": False,
+        "token": "REEMPLAZA_TU_TOKEN"
     },
-    "ui": {
-        "last_test_name": "name"
-    }
+    # systemd OnCalendar (ejemplo: todos los días 02:00)
+    "oncalendar": "*-*-* 02:00:00"
 }
 
-def load_config() -> dict:
-    if not CFG_PATH.exists():
-        save_config(DEFAULTS)
-        return DEFAULTS.copy()
-    with open(CFG_PATH, "r", encoding="utf-8") as f:
+def load_config() -> Dict[str, Any]:
+    ensure_dirs()
+    if not CFG_FILE.exists():
+        save_config(_DEFAULTS.copy())
+        return _DEFAULTS.copy()
+    with open(CFG_FILE, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
-    out = DEFAULTS.copy()
+    # merge simple (nivel 1/2)
+    cfg = _DEFAULTS.copy()
     for k, v in data.items():
-        if isinstance(v, dict) and isinstance(out.get(k), dict):
-            tmp = out[k].copy(); tmp.update(v); out[k] = tmp
+        if isinstance(v, dict) and k in cfg:
+            cfg[k].update(v)
         else:
-            out[k] = v
-    return out
+            cfg[k] = v
+    return cfg
 
-def save_config(cfg: dict):
-    CFG_DIR.mkdir(parents=True, exist_ok=True)
-    with open(CFG_PATH, "w", encoding="utf-8") as f:
+def save_config(cfg: Dict[str, Any]) -> None:
+    ensure_dirs()
+    with open(CFG_FILE, "w", encoding="utf-8") as f:
         yaml.safe_dump(cfg, f, sort_keys=False, allow_unicode=True)
