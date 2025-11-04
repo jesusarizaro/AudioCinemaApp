@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 from pathlib import Path
 
-APP_DIR = Path(__file__).resolve().parents[1]
-CFG_DIR = APP_DIR / "config"
-DATA_DIR = APP_DIR / "data"
-REP_DIR = DATA_DIR / "reports"
-ASSETS_DIR = APP_DIR / "assets"
+# Raíz de la app (dos niveles arriba de este archivo)
+APP_DIR: Path = Path(__file__).resolve().parents[1]
+
+CFG_DIR: Path = APP_DIR / "config"
+DATA_DIR: Path = APP_DIR / "data"
+CAPTURES_DIR: Path = DATA_DIR / "captures"
+REPORTS_DIR: Path = DATA_DIR / "reports"
+ASSETS_DIR: Path = APP_DIR / "assets"
 
 def ensure_dirs() -> None:
-    """Crea estructura mínima del proyecto."""
-    CFG_DIR.mkdir(parents=True, exist_ok=True)
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    REP_DIR.mkdir(parents=True, exist_ok=True)
-    ASSETS_DIR.mkdir(parents=True, exist_ok=True)
+    for d in (CFG_DIR, DATA_DIR, CAPTURES_DIR, REPORTS_DIR, ASSETS_DIR):
+        d.mkdir(parents=True, exist_ok=True)
