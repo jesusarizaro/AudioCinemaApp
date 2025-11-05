@@ -21,9 +21,11 @@ from matplotlib.figure import Figure
 from app_platform import APP_DIR, ASSETS_DIR, ensure_dirs
 from configio import load_config, save_config
 from analyzer import (
-    normalize_mono, record_audio, analyze_pair, detect_beeps, build_segments,
-    build_json_payload
+    normalize_mono, record_audio, analyze_pair,  # <- normalize_mono existe aquí
+    detect_beeps, build_segments, crop_same_length,
+    build_json_payload, welch_db, BANDS
 )
+
 from iot_tb import send_json_to_thingsboard
 
 APP_NAME = "AudioCinema"
