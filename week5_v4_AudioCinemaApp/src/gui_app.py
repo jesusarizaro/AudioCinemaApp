@@ -140,10 +140,10 @@ class AudioCinemaGUI:
 
         if self._icon_img is not None:
             ttk.Label(card, image=self._icon_img).pack(anchor="n", pady=(0,4))
-        ttk.Label(card, text="AudioCinema", font=("Segoe UI", 12, "bold")).pack(anchor="n")
+        ttk.Label(card, text="AudioCinema", font=("Segoe UI", 18, "bold")).pack(anchor="n")
 
         desc = ("Graba, evalúa y analiza tu sistema de audio "
-                "para garantizar siempre la mejor experiencia envolvente.")
+                "para garantizar la mejor experiencia envolvente.")
         lbl = ttk.Label(card, text=desc, wraplength=220, justify="center")
         lbl.pack(anchor="n", pady=(6,10))
 
@@ -179,7 +179,7 @@ class AudioCinemaGUI:
         fig_card = ttk.Frame(right, padding=4)
         fig_card.pack(fill=BOTH, expand=True)
 
-        self.fig = Figure(figsize=(7,5), dpi=100)
+        self.fig = Figure(figsize=(5,4), dpi=100)
         self.ax_ref = self.fig.add_subplot(2,1,1)
         self.ax_cur = self.fig.add_subplot(2,1,2)
 
