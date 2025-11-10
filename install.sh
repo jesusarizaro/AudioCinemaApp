@@ -1,94 +1,104 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Detecta ruta absoluta del proyecto (independiente del usuario/sitio)
+# === DETECTAR DIRECTORIOS ===
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV_DIR="$PROJECT_DIR/.venv"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
+USER_HOME=$(eval echo "~$USER")
+DESKTOP_DIR="$USER_HOME/Desktop"
+LOCAL_APPS_DIR="$USER_HOME/.local/share/applications"
 
-echo "[1/6] Creando venv..."
+echo "=== [1/7] Creando entorno virtual ==="
 $PYTHON_BIN -m venv "$VENV_DIR"
 source "$VENV_DIR/bin/activate"
 
-echo "[2/6] Instalando dependencias..."
+echo "=== [2/7] Instalando dependencias ==="
 pip install --upgrade pip wheel
 pip install -r "$PROJECT_DIR/requirements.txt"
 
-echo "[3/6] Creando carpetas de datos..."
-mkdir -p "$PROJECT_DIR/data/captures" "$PROJECT_DIR/data/reports" "$PROJECT_DIR/config"
+echo "=== [3/7] Creando carpetas necesarias ==="
+mkdir -p "$PROJECT_DIR/data/captures" "$PROJECT_DIR/data/reports" "$PROJECT_DIR/config" "$PROJECT_DIR/assets"
 
-# Config por defecto si no existe
 CFG="$PROJECT_DIR/config/config.json"
 if [ ! -f "$CFG" ]; then
-  cat > "$CFG" <<'JSON'
+cat > "$CFG" <<'JSON'
 {
-  "reference": {
-    "wav_path": "assets/reference.wav"
-  },
-  "audio": {
-    "fs": 44100,
-    "duration_s": 8.0,
-    "preferred_input_name": ""
-  },
-  "thingsboard": {
-    "host": "thingsboard.cloud",
-    "port": 1883,
-    "use_tls": false,
-    "token": "REEMPLAZA_TU_TOKEN"
-  },
-  "schedule": {
-    "mode": "daemon",          // "daemon" recomendado; "timer" opcional
-    "interval": "15m"          // 10m, 15m, 1h, 2h, etc.
-  },
-  "oncalendar": "every 15m"    // por compatibilidad con tu GUI actual
+  "reference": {"wav_path": "assets/reference.wav"},
+  "audio": {"fs": 44100, "duration_s": 8.0, "preferred_input_name": ""},
+  "thingsboard": {"host":"thingsboard.cloud","port":1883,"use_tls":false,"token":"REEMPLAZA_TU_TOKEN"},
+  "schedule": {"mode":"daemon","interval":"15m"},
+  "oncalendar": "every 15m"
 }
 JSON
-  echo "[cfg] Escrito config.json por defecto."
+  echo "[cfg] Archivo config.json creado."
 fi
 
-# Icono y assets básicos
-mkdir -p "$PROJECT_DIR/assets"
+# === [4/7] Crear referencia e icono si faltan ===
 if [ ! -f "$PROJECT_DIR/assets/audiocinema.png" ]; then
-  # icono placeholder
-  convert -size 256x256 xc:#0d6efd -gravity center -pointsize 72 -fill white \
-    -annotate 0 "AC" "$PROJECT_DIR/assets/audiocinema.png" 2>/dev/null || true
-fi
-if [ ! -f "$PROJECT_DIR/assets/reference.wav" ]; then
-  # referencia placeholder: 1kHz seno 8s @ -12 dBFS
+  echo "[icon] Creando icono por defecto..."
   python3 - <<'PY'
-import numpy as np, soundfile as sf, os
-sr=44100; t=8.0
-n=int(sr*t)
-x=0.25*np.sin(2*np.pi*1000*np.arange(n)/sr).astype(np.float32)
+import numpy as np, soundfile as sf, os, matplotlib.pyplot as plt
 os.makedirs("assets", exist_ok=True)
-sf.write("assets/reference.wav", x, sr)
+fig, ax = plt.subplots(figsize=(2.56,2.56))
+ax.axis("off")
+ax.text(0.5,0.5,"AC",fontsize=120,va="center",ha="center",color="white",weight="bold")
+fig.patch.set_facecolor("#0d6efd")
+plt.savefig("assets/audiocinema.png", dpi=100, bbox_inches="tight", pad_inches=0)
 PY
 fi
 
-echo "[4/6] Instalando systemd service..."
-# Genera servicio con rutas correctas
+if [ ! -f "$PROJECT_DIR/assets/reference.wav" ]; then
+  echo "[ref] Creando referencia 1kHz.wav..."
+  python3 - <<'PY'
+import numpy as np, soundfile as sf, os
+sr=44100; t=8.0
+x=0.25*np.sin(2*np.pi*1000*np.arange(int(sr*t))/sr).astype(np.float32)
+sf.write("assets/reference.wav",x,sr)
+PY
+fi
+
+# === [5/7] Instalar servicio systemd ===
 SERVICE_SRC="$PROJECT_DIR/systemd/audiocinema.service"
 SERVICE_DST="/etc/systemd/system/audiocinema.service"
 
-# Sustituye la variable %%PROJECT_DIR%% por la ruta real
+echo "[systemd] Instalando servicio..."
 sudo bash -c "sed 's|%%PROJECT_DIR%%|$PROJECT_DIR|g' '$SERVICE_SRC' > '$SERVICE_DST'"
-
-# (Opcional) instala el timer con un intervalo base (no se usará si mode=daemon)
-TIMER_SRC="$PROJECT_DIR/systemd/audiocinema.timer"
-TIMER_DST="/etc/systemd/system/audiocinema.timer"
-if [ -f "$TIMER_SRC" ]; then
-  sudo bash -c "sed 's|%%PROJECT_DIR%%|$PROJECT_DIR|g' '$TIMER_SRC' > '$TIMER_DST'"
-fi
-
-echo "[5/6] Recargando systemd y habilitando servicio..."
 sudo systemctl daemon-reload
 sudo systemctl enable audiocinema.service
 sudo systemctl restart audiocinema.service
+echo "[systemd] Servicio activo. Usa: sudo systemctl status audiocinema.service"
 
-# (Opcional) habilitar timer si quieres modo timer en el futuro
-# sudo systemctl enable --now audiocinema.timer
+# === [6/7] Crear acceso directo (.desktop) ===
+echo "[desktop] Creando acceso directo de AudioCinema..."
 
-echo "[6/6] Listo ✅"
-echo "Servicio activo:   sudo systemctl status audiocinema.service"
-echo "Ejecutar 1 vez:    $VENV_DIR/bin/python -m src.headless_runner --once"
-echo "Logs en vivo:      journalctl -u audiocinema.service -f"
+mkdir -p "$LOCAL_APPS_DIR"
+mkdir -p "$DESKTOP_DIR"
+
+DESKTOP_FILE="$LOCAL_APPS_DIR/audiocinema.desktop"
+
+cat > "$DESKTOP_FILE" <<EOF
+[Desktop Entry]
+Type=Application
+Name=AudioCinema
+Comment=Analizador de audio IoT
+Exec=$PROJECT_DIR/.venv/bin/python -m src.gui_app
+Icon=$PROJECT_DIR/assets/audiocinema.png
+Path=$PROJECT_DIR
+Terminal=false
+Categories=Audio;Utility;
+StartupNotify=true
+EOF
+
+# Copiar al escritorio también
+cp "$DESKTOP_FILE" "$DESKTOP_DIR/audiocinema.desktop" 2>/dev/null || true
+chmod +x "$DESKTOP_FILE" "$DESKTOP_DIR/audiocinema.desktop" 2>/dev/null || true
+
+echo "[desktop] Acceso directo creado:"
+echo " - Menú principal → Sonido y video → AudioCinema"
+echo " - Escritorio → icono AudioCinema"
+
+# === [7/7] Final ===
+echo "✅ Instalación completa."
+echo "Puedes abrir el programa desde el menú o el icono del escritorio."
+echo "El servicio se ejecuta en segundo plano y enviará datos automáticamente."
