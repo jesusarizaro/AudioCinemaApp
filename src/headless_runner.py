@@ -5,13 +5,12 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-from app_platform import APP_DIR, REPORTS_DIR
-from configio import load_config, save_config, read_interval_seconds
-from analyzer import (
-    normalize_mono, record_audio, analyze_pair,
-    detect_beeps, build_segments, build_json_payload, BANDS
-)
-from iot_tb import send_json_to_thingsboard
+from .app_platform import APP_DIR, REPORTS_DIR
+from .configio import load_config, save_config, read_interval_seconds
+from .analyzer import (normalize_mono, record_audio, analyze_pair,
+                       detect_beeps, build_segments, build_json_payload, BANDS)
+from .iot_tb import send_json_to_thingsboard
+
 
 APP_NAME = "AudioCinema"
 
