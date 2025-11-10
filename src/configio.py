@@ -2,7 +2,7 @@
 import json, re, time
 from pathlib import Path
 from typing import Any, Dict
-from app_platform import CONFIG_PATH, ensure_dirs
+from .app_platform import CONFIG_PATH, ensure_dirs
 
 _DEFAULT = {
     "reference": {"wav_path": "assets/reference.wav"},
