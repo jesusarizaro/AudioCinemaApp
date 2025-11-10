@@ -9,16 +9,16 @@ USER_HOME=$(eval echo "~$USER")
 DESKTOP_DIR="$USER_HOME/Desktop"
 LOCAL_APPS_DIR="$USER_HOME/.local/share/applications"
 
-echo "=== [1/7] Creando entorno virtual ==="
+echo "=== [1/6] Creando entorno virtual ==="
 $PYTHON_BIN -m venv "$VENV_DIR"
 source "$VENV_DIR/bin/activate"
 
-echo "=== [2/7] Instalando dependencias ==="
+echo "=== [2/6] Instalando dependencias ==="
 pip install --upgrade pip wheel
 pip install -r "$PROJECT_DIR/requirements.txt"
 
-echo "=== [3/7] Creando carpetas necesarias ==="
-mkdir -p "$PROJECT_DIR/data/captures" "$PROJECT_DIR/data/reports" "$PROJECT_DIR/config" "$PROJECT_DIR/assets"
+echo "=== [3/6] Creando carpetas de datos/config ==="
+mkdir -p "$PROJECT_DIR/data/captures" "$PROJECT_DIR/data/reports" "$PROJECT_DIR/config"
 
 CFG="$PROJECT_DIR/config/config.json"
 if [ ! -f "$CFG" ]; then
@@ -34,49 +34,40 @@ JSON
   echo "[cfg] Archivo config.json creado."
 fi
 
-# === [4/7] Crear referencia e icono si faltan ===
+echo "=== [4/6] Verificando assets provistos por el usuario ==="
+if [ ! -d "$PROJECT_DIR/assets" ]; then
+  echo "❌ No existe la carpeta '$PROJECT_DIR/assets'. Debes proveerla antes de instalar."
+  exit 1
+fi
 if [ ! -f "$PROJECT_DIR/assets/audiocinema.png" ]; then
-  echo "[icon] Creando icono por defecto..."
-  python3 - <<'PY'
-import numpy as np, soundfile as sf, os, matplotlib.pyplot as plt
-os.makedirs("assets", exist_ok=True)
-fig, ax = plt.subplots(figsize=(2.56,2.56))
-ax.axis("off")
-ax.text(0.5,0.5,"AC",fontsize=120,va="center",ha="center",color="white",weight="bold")
-fig.patch.set_facecolor("#0d6efd")
-plt.savefig("assets/audiocinema.png", dpi=100, bbox_inches="tight", pad_inches=0)
-PY
+  echo "❌ Falta '$PROJECT_DIR/assets/audiocinema.png'. Debes proveer el icono."
+  exit 1
 fi
-
 if [ ! -f "$PROJECT_DIR/assets/reference.wav" ]; then
-  echo "[ref] Creando referencia 1kHz.wav..."
-  python3 - <<'PY'
-import numpy as np, soundfile as sf, os
-sr=44100; t=8.0
-x=0.25*np.sin(2*np.pi*1000*np.arange(int(sr*t))/sr).astype(np.float32)
-sf.write("assets/reference.wav",x,sr)
-PY
+  echo "❌ Falta '$PROJECT_DIR/assets/reference.wav'. Debes proveer la referencia de audio."
+  exit 1
 fi
+echo "✅ Assets verificados."
 
-# === [5/7] Instalar servicio systemd ===
+echo "=== [5/6] Instalando servicio systemd (daemon headless) ==="
 SERVICE_SRC="$PROJECT_DIR/systemd/audiocinema.service"
 SERVICE_DST="/etc/systemd/system/audiocinema.service"
 
-echo "[systemd] Instalando servicio..."
+if [ ! -f "$SERVICE_SRC" ]; then
+  echo "❌ Falta '$SERVICE_SRC'. Asegúrate de tener systemd/audiocinema.service en el proyecto."
+  exit 1
+fi
+
 sudo bash -c "sed 's|%%PROJECT_DIR%%|$PROJECT_DIR|g' '$SERVICE_SRC' > '$SERVICE_DST'"
 sudo systemctl daemon-reload
 sudo systemctl enable audiocinema.service
 sudo systemctl restart audiocinema.service
 echo "[systemd] Servicio activo. Usa: sudo systemctl status audiocinema.service"
 
-# === [6/7] Crear acceso directo (.desktop) ===
-echo "[desktop] Creando acceso directo de AudioCinema..."
-
-mkdir -p "$LOCAL_APPS_DIR"
-mkdir -p "$DESKTOP_DIR"
+echo "=== [6/6] Creando acceso directo (.desktop) ==="
+mkdir -p "$LOCAL_APPS_DIR" "$DESKTOP_DIR"
 
 DESKTOP_FILE="$LOCAL_APPS_DIR/audiocinema.desktop"
-
 cat > "$DESKTOP_FILE" <<EOF
 [Desktop Entry]
 Type=Application
@@ -90,15 +81,9 @@ Categories=Audio;Utility;
 StartupNotify=true
 EOF
 
-# Copiar al escritorio también
 cp "$DESKTOP_FILE" "$DESKTOP_DIR/audiocinema.desktop" 2>/dev/null || true
 chmod +x "$DESKTOP_FILE" "$DESKTOP_DIR/audiocinema.desktop" 2>/dev/null || true
 
-echo "[desktop] Acceso directo creado:"
-echo " - Menú principal → Sonido y video → AudioCinema"
-echo " - Escritorio → icono AudioCinema"
-
-# === [7/7] Final ===
 echo "✅ Instalación completa."
-echo "Puedes abrir el programa desde el menú o el icono del escritorio."
-echo "El servicio se ejecuta en segundo plano y enviará datos automáticamente."
+echo "Abre la GUI desde el menú (Sonido y video → AudioCinema) o el icono del escritorio."
+echo "El servicio headless se ejecuta en segundo plano y enviará datos automáticamente."
