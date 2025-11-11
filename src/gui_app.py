@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import os, json
+import os, json, traceback
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Any
 
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -22,8 +22,7 @@ from app_platform import APP_DIR, ASSETS_DIR, ensure_dirs
 from configio import load_config, save_config
 from analyzer import (
     normalize_mono, record_audio, analyze_pair,
-    detect_beeps, build_segments, crop_same_length,
-    build_json_payload
+    detect_beeps, build_segments, build_json_payload
 )
 from iot_tb import send_json_to_thingsboard
 
@@ -33,7 +32,6 @@ EXPORT_DIR = (APP_DIR / "data" / "reports").absolute()
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 EXPORT_DIR.mkdir(parents=True, exist_ok=True)
 
-PREFERRED_INPUT_NAME = os.environ.get("AUDIOCINEMA_INPUT_NAME","")
 ENV_INPUT_INDEX = os.environ.get("AUDIOCINEMA_INPUT_INDEX")
 
 INFO_TEXT = (
@@ -50,13 +48,15 @@ INFO_TEXT = (
     "• Verifica el archivo de referencia en Configuración."
 )
 
-# -------- util mic --------
+# ---------- util mic ----------
 def pick_input_device(preferred_name_substr: Optional[str] = None) -> Optional[int]:
     import sounddevice as sd
     try:
         devices = sd.query_devices()
     except Exception:
         return None
+
+    # prioridad: índice por variable de entorno
     if ENV_INPUT_INDEX:
         try:
             idx = int(ENV_INPUT_INDEX)
@@ -64,15 +64,33 @@ def pick_input_device(preferred_name_substr: Optional[str] = None) -> Optional[i
                 return idx
         except Exception:
             pass
+
+    # siguiente: substring del nombre
     if preferred_name_substr:
         s = preferred_name_substr.lower()
-        for i,d in enumerate(devices):
+        for i, d in enumerate(devices):
             if s in str(d.get("name","")).lower() and d.get("max_input_channels",0) > 0:
                 return i
-    for i,d in enumerate(devices):
+
+    # último: primer dispositivo con entrada
+    for i, d in enumerate(devices):
         if d.get("max_input_channels",0) > 0:
             return i
     return None
+
+# ---------- decorador para mostrar errores UI ----------
+def ui_action(fn):
+    def wrapper(self, *args, **kwargs):
+        try:
+            return fn(self, *args, **kwargs)
+        except Exception as e:
+            tb_str = traceback.format_exc()
+            try:
+                messagebox.showerror(APP_NAME, f"{e}\n\n{tb_str}")
+            except Exception:
+                print(tb_str)
+            return None
+    return wrapper
 
 
 class AudioCinemaGUI:
@@ -87,36 +105,37 @@ class AudioCinemaGUI:
         except Exception:
             pass
 
-        # Icono en ventana y clase de WM
+        # Icono en ventana
         self._icon_img = None
         try:
-            self._icon_img = tk.PhotoImage(file=str(ASSETS_DIR / "audiocinema.png"))
-            self.root.iconphoto(True, self._icon_img)            # <- icono en ventana/barra
+            icon_path = ASSETS_DIR / "audiocinema.png"
+            if icon_path.exists():
+                self._icon_img = tk.PhotoImage(file=str(icon_path))
+                self.root.iconphoto(True, self._icon_img)
         except Exception:
             self._icon_img = None
         try:
-            self.root.wm_class(APP_NAME, APP_NAME)               # ayuda a algunos WM a mostrar icono
+            self.root.wm_class(APP_NAME, APP_NAME)
         except Exception:
             pass
 
         ensure_dirs()
         self.cfg = load_config()
 
-        # Variables visibles (se sincronizan tras cerrar Config)
-        self.fs = tk.IntVar(value=int(self.cfg["audio"]["fs"]))
-        self.duration = tk.DoubleVar(value=float(self.cfg["audio"]["duration_s"]))
+        # Variables visibles (mostradas en cabecera)
+        self.fs = tk.IntVar(value=int(self._cfg(["audio","fs"], 48000)))
+        self.duration = tk.DoubleVar(value=float(self._cfg(["audio","duration_s"], 10.0)))
 
         self.input_device_index: Optional[int] = None
-
         self.test_name = tk.StringVar(value="—")
         self.eval_text = tk.StringVar(value="—")
 
-        # buffers último run (ondas)
+        # buffers de ondas últimas
         self.last_ref: Optional[np.ndarray] = None
         self.last_cur: Optional[np.ndarray] = None
         self.last_fs: int = int(self.fs.get())
 
-        # markers/segments (para JSON)
+        # markers/segments para JSON
         self.ref_markers: List[int] = []
         self.cur_markers: List[int] = []
         self.ref_segments: List[Tuple[int,int]] = []
@@ -124,6 +143,23 @@ class AudioCinemaGUI:
 
         self._build_ui()
         self._auto_select_input_device()
+
+    # --- helpers cfg seguros ---
+    def _cfg(self, path: List[str], default: Any = None) -> Any:
+        d = self.cfg
+        for key in path:
+            if not isinstance(d, dict) or key not in d:
+                return default
+            d = d[key]
+        return d
+
+    def _set_cfg(self, path: List[str], value: Any) -> None:
+        d = self.cfg
+        for key in path[:-1]:
+            if key not in d or not isinstance(d[key], dict):
+                d[key] = {}
+            d = d[key]
+        d[path[-1]] = value
 
     # --------------------- UI ---------------------
     def _build_ui(self):
@@ -140,7 +176,6 @@ class AudioCinemaGUI:
         card = ttk.Frame(left, padding=6)
         card.pack(fill=Y, expand=False)
 
-        # Logo dentro de la GUI
         if self._icon_img is not None:
             ttk.Label(card, image=self._icon_img).pack(anchor="n", pady=(0,4))
         ttk.Label(card, text="AudioCinema", font=("Segoe UI", 18, "bold")).pack(anchor="n")
@@ -159,7 +194,7 @@ class AudioCinemaGUI:
         sep = ttk.Separator(root_frame, orient=VERTICAL)
         paned.add(sep)
 
-        # --------- DERECHA: cabecera + formas de onda + mensajes ---------
+        # --------- DERECHA: cabecera + ondas + mensajes ---------
         right = ttk.Frame(paned, padding=(8,6))
         paned.add(right, weight=4)
 
@@ -174,7 +209,6 @@ class AudioCinemaGUI:
         self.eval_lbl = ttk.Label(header, textvariable=self.eval_text, font=("Segoe UI", 11, "bold"), foreground="#333")
         self.eval_lbl.grid(row=1, column=1, sticky="w", pady=(6,0))
 
-        # Fig con dos ejes (formas de onda)
         fig_card = ttk.Frame(right, padding=4)
         fig_card.pack(fill=BOTH, expand=True)
 
@@ -226,30 +260,37 @@ class AudioCinemaGUI:
             self.msg_text.insert(tk.END, "• " + ln + "\n")
         self.msg_text.see(tk.END)
 
-    # ----------------- acciones -----------------
+    # ----------------- acciones (con handlers seguros) -----------------
     def _auto_select_input_device(self):
-        self.input_device_index = pick_input_device(self.cfg["audio"].get("preferred_input_name",""))
+        pref = str(self._cfg(["audio","preferred_input_name"], ""))
+        self.input_device_index = pick_input_device(pref)
 
+    @ui_action
     def _show_info(self):
         messagebox.showinfo(APP_NAME, INFO_TEXT)
 
+    @ui_action
     def _popup_confirm(self):
-        tb_cfg = self.cfg["thingsboard"]
+        tb_cfg = {
+            "host": self._cfg(["thingsboard","host"], "thingsboard.cloud"),
+            "port": self._cfg(["thingsboard","port"], 1883),
+            "use_tls": self._cfg(["thingsboard","use_tls"], False),
+            "token": self._cfg(["thingsboard","token"], ""),
+        }
         txt = (
-            f"Archivo de referencia:\n  {self.cfg['reference']['wav_path']}\n\n"
-            f"Audio:\n  fs={self.cfg['audio']['fs']}  duración={self.cfg['audio']['duration_s']} s\n"
-            f"  preferir dispositivo='{self.cfg['audio'].get('preferred_input_name','')}'\n\n"
+            f"Archivo de referencia:\n  {self._cfg(['reference','wav_path'], str(ASSETS_DIR/'reference_master.wav'))}\n\n"
+            f"Audio:\n  fs={self._cfg(['audio','fs'],48000)}  duración={self._cfg(['audio','duration_s'],10.0)} s\n"
+            f"  preferir dispositivo='{self._cfg(['audio','preferred_input_name'],'')}'\n\n"
             f"ThingsBoard:\n  host={tb_cfg['host']}  port={tb_cfg['port']}  TLS={tb_cfg['use_tls']}\n"
             f"  token={tb_cfg['token']}\n\n"
-            f"Programación (systemd):\n  {self.cfg['oncalendar']}\n"
+            f"Programación (systemd):\n  {self._cfg(['oncalendar'],'*-*-* 02:00:00')}\n"
         )
         messagebox.showinfo("Confirmación", txt)
 
+    @ui_action
     def _popup_config(self):
         w = tk.Toplevel(self.root)
         w.title("Configuración")
-
-        # Icono también en el popup
         if self._icon_img is not None:
             try:
                 w.iconphoto(True, self._icon_img)
@@ -262,8 +303,8 @@ class AudioCinemaGUI:
 
         # General
         g = ttk.Frame(nb); nb.add(g, text="General")
-        ref_var = tk.StringVar(value=self.cfg["reference"]["wav_path"])
-        oncal_var = tk.StringVar(value=self.cfg["oncalendar"])
+        ref_var = tk.StringVar(value=self._cfg(["reference","wav_path"], str(ASSETS_DIR/"reference_master.wav")))
+        oncal_var = tk.StringVar(value=self._cfg(["oncalendar"], "*-*-* 02:00:00"))
         ttk.Label(g, text="Archivo de referencia (.wav):").grid(row=0, column=0, sticky="w", pady=(6,2))
         ttk.Entry(g, textvariable=ref_var, width=52).grid(row=0, column=1, sticky="we", pady=(6,2))
         ttk.Label(g, text="OnCalendar (systemd):").grid(row=1, column=0, sticky="w", pady=(6,2))
@@ -271,9 +312,9 @@ class AudioCinemaGUI:
 
         # Audio
         a = ttk.Frame(nb); nb.add(a, text="Audio")
-        fs_var = tk.IntVar(value=int(self.cfg["audio"]["fs"]))
-        dur_var = tk.DoubleVar(value=float(self.cfg["audio"]["duration_s"]))
-        pref_in = tk.StringVar(value=self.cfg["audio"].get("preferred_input_name",""))
+        fs_var = tk.IntVar(value=int(self._cfg(["audio","fs"], 48000)))
+        dur_var = tk.DoubleVar(value=float(self._cfg(["audio","duration_s"], 10.0)))
+        pref_in = tk.StringVar(value=self._cfg(["audio","preferred_input_name"], ""))
         ttk.Label(a, text="Sample Rate (Hz):").grid(row=0, column=0, sticky="w", pady=(6,2))
         ttk.Entry(a, textvariable=fs_var, width=10).grid(row=0, column=1, sticky="w")
         ttk.Label(a, text="Duración (s):").grid(row=1, column=0, sticky="w", pady=(6,2))
@@ -283,10 +324,10 @@ class AudioCinemaGUI:
 
         # ThingsBoard
         t = ttk.Frame(nb); nb.add(t, text="ThingsBoard")
-        host_var = tk.StringVar(value=self.cfg["thingsboard"]["host"])
-        port_var = tk.IntVar(value=int(self.cfg["thingsboard"]["port"]))
-        tls_var  = tk.BooleanVar(value=bool(self.cfg["thingsboard"]["use_tls"]))
-        token_var = tk.StringVar(value=self.cfg["thingsboard"]["token"])
+        host_var = tk.StringVar(value=self._cfg(["thingsboard","host"], "thingsboard.cloud"))
+        port_var = tk.IntVar(value=int(self._cfg(["thingsboard","port"], 1883)))
+        tls_var  = tk.BooleanVar(value=bool(self._cfg(["thingsboard","use_tls"], False)))
+        token_var = tk.StringVar(value=self._cfg(["thingsboard","token"], ""))
         ttk.Label(t, text="Host:").grid(row=0, column=0, sticky="w", pady=(6,2))
         ttk.Entry(t, textvariable=host_var, width=24).grid(row=0, column=1, sticky="w")
         ttk.Label(t, text="Port:").grid(row=1, column=0, sticky="w", pady=(6,2))
@@ -295,68 +336,61 @@ class AudioCinemaGUI:
         ttk.Label(t, text="Token:").grid(row=3, column=0, sticky="w", pady=(6,2))
         ttk.Entry(t, textvariable=token_var, width=40).grid(row=3, column=1, sticky="w")
 
-        # Botonera
+        # Barra guardar/cancelar
         btns = ttk.Frame(frm); btns.pack(fill=X, pady=(10,0))
         def on_save():
-            self.cfg["reference"]["wav_path"] = ref_var.get().strip()
-            self.cfg["oncalendar"] = oncal_var.get().strip()
-            self.cfg["audio"]["fs"] = int(fs_var.get())
-            self.cfg["audio"]["duration_s"] = float(dur_var.get())
-            self.cfg["audio"]["preferred_input_name"] = pref_in.get().strip()
-            self.cfg["thingsboard"]["host"] = host_var.get().strip()
-            self.cfg["thingsboard"]["port"] = int(port_var.get())
-            self.cfg["thingsboard"]["use_tls"] = bool(tls_var.get())
-            self.cfg["thingsboard"]["token"] = token_var.get().strip()
+            self._set_cfg(["reference","wav_path"], ref_var.get().strip())
+            self._set_cfg(["oncalendar"], oncal_var.get().strip())
+            self._set_cfg(["audio","fs"], int(fs_var.get()))
+            self._set_cfg(["audio","duration_s"], float(dur_var.get()))
+            self._set_cfg(["audio","preferred_input_name"], pref_in.get().strip())
+            self._set_cfg(["thingsboard","host"], host_var.get().strip())
+            self._set_cfg(["thingsboard","port"], int(port_var.get()))
+            self._set_cfg(["thingsboard","use_tls"], bool(tls_var.get()))
+            self._set_cfg(["thingsboard","token"], token_var.get().strip())
             save_config(self.cfg)
 
-            # --- SINCRONIZAR variables visibles en cabecera ---
-            self.fs.set(int(self.cfg["audio"]["fs"]))
-            self.duration.set(float(self.cfg["audio"]["duration_s"]))
+            # sincroniza cabecera
+            self.fs.set(int(self._cfg(["audio","fs"], 48000)))
+            self.duration.set(float(self._cfg(["audio","duration_s"], 10.0)))
 
             messagebox.showinfo(APP_NAME, "Configuración guardada.")
             w.destroy()
+
         tb.Button(btns, text="Guardar", bootstyle=PRIMARY, command=on_save).pack(side=RIGHT)
         tb.Button(btns, text="Cancelar", bootstyle=SECONDARY, command=w.destroy).pack(side=RIGHT, padx=(0,6))
 
-        # foco modal amistoso
+        # modal amigable
         try:
             w.grab_set()
             w.transient(self.root)
         except Exception:
             pass
 
-    # ----------------- ejecución de prueba -----------------
+    @ui_action
     def _run_once(self):
-        # LEE SIEMPRE DESDE self.cfg → respeta Configuración
-        fs  = int(self.cfg["audio"]["fs"])
-        dur = float(self.cfg["audio"]["duration_s"])
+        # Lee SIEMPRE desde config (garantiza consistencia)
+        fs  = int(self._cfg(["audio","fs"], 48000))
+        dur = float(self._cfg(["audio","duration_s"], 10.0))
         self.last_fs = fs
 
-        # 1) referencia
-        ref_path = Path(self.cfg["reference"]["wav_path"])
+        # 1) cargar referencia
+        ref_path = Path(self._cfg(["reference","wav_path"], str(ASSETS_DIR/"reference_master.wav")))
         if not ref_path.exists():
-            messagebox.showerror(APP_NAME, f"No existe archivo de referencia:\n{ref_path}")
-            return
-        try:
-            x_ref, fs_ref = sf.read(ref_path, dtype="float32", always_2d=False)
-            if x_ref.ndim == 2: x_ref = x_ref.mean(axis=1)
-            x_ref = normalize_mono(x_ref)
-            if fs_ref != fs:
-                # simple resample por interpolación lineal
-                n_new = int(round(len(x_ref) * fs / fs_ref))
-                x_idx = np.linspace(0, 1, len(x_ref))
-                new_idx = np.linspace(0, 1, n_new)
-                x_ref = np.interp(new_idx, x_idx, x_ref).astype(np.float32)
-        except Exception as e:
-            messagebox.showerror(APP_NAME, f"No se pudo leer referencia: {e}")
-            return
+            raise FileNotFoundError(f"No existe archivo de referencia:\n{ref_path}")
 
-        # 2) grabar actual
-        try:
-            x_cur = record_audio(dur, fs=fs, channels=1, device=self.input_device_index)
-        except Exception as e:
-            messagebox.showerror(APP_NAME, f"Error grabando micrófono: {e}")
-            return
+        x_ref, fs_ref = sf.read(ref_path, dtype="float32", always_2d=False)
+        if x_ref.ndim == 2:
+            x_ref = x_ref.mean(axis=1)
+        x_ref = normalize_mono(x_ref)
+        if fs_ref != fs:
+            n_new = int(round(len(x_ref) * fs / fs_ref))
+            x_idx = np.linspace(0, 1, len(x_ref))
+            new_idx = np.linspace(0, 1, n_new)
+            x_ref = np.interp(new_idx, x_idx, x_ref).astype(np.float32)
+
+        # 2) grabar muestra
+        x_cur = record_audio(dur, fs=fs, channels=1, device=self.input_device_index)
 
         # 3) analizar
         res = analyze_pair(x_ref, x_cur, fs)
@@ -378,39 +412,28 @@ class AudioCinemaGUI:
         # 6) nombre de la prueba (no editable)
         self.test_name.set(datetime.now().strftime("Test_%Y-%m-%d_%H-%M-%S"))
 
-        # 7) exportar JSON y enviar a TB
+        # 7) exportar y enviar
         payload = build_json_payload(
             fs, res, [], self.ref_markers, self.cur_markers,
             self.ref_segments, self.cur_segments, None, None
         )
         out = EXPORT_DIR / f"analysis_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json"
-        ok_json = False
-        try:
-            with open(out, "w", encoding="utf-8") as f:
-                json.dump(payload, f, ensure_ascii=False, indent=2)
-            ok_json = True
-        except Exception as e:
-            self._set_messages([f"No se pudo guardar JSON: {e}"])
+        with open(out, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
 
         sent = False
-        if ok_json:
-            tb_cfg = self.cfg["thingsboard"]
-            if tb_cfg.get("token") and tb_cfg["token"] != "REEMPLAZA_TU_TOKEN":
-                sent = send_json_to_thingsboard(
-                    payload,
-                    tb_cfg["host"],
-                    int(tb_cfg["port"]),
-                    tb_cfg["token"],
-                    bool(tb_cfg["use_tls"])
-                )
+        host = self._cfg(["thingsboard","host"], "thingsboard.cloud")
+        port = int(self._cfg(["thingsboard","port"], 1883))
+        token = self._cfg(["thingsboard","token"], "")
+        use_tls = bool(self._cfg(["thingsboard","use_tls"], False))
+        if token:
+            sent = send_json_to_thingsboard(payload, host, port, token, use_tls)
 
-        # 8) mensajes
-        lines = []
-        lines.append("La prueba ha " + ("aprobado." if res["overall"] == "PASSED" else "fallado."))
-        lines.append(f"JSON: {out}")
-        lines.append("Resultados enviados a ThingsBoard." if sent else "No se enviaron resultados a ThingsBoard.")
-        self._set_messages(lines)
-
+        self._set_messages([
+            "La prueba ha " + ("aprobado." if res["overall"] == "PASSED" else "fallado."),
+            f"JSON: {out}",
+            ("Resultados enviados a ThingsBoard." if sent else "No se enviaron resultados a ThingsBoard.")
+        ])
         messagebox.showinfo(APP_NAME, f"Análisis terminado.\nJSON: {out}")
 
 
