@@ -386,6 +386,123 @@ class AudioCinemaGUI:
 
         messagebox.showinfo(APP_NAME, f"Análisis terminado.\nJSON: {out}")
 
+
+class ConfigDialog(tk.Toplevel):
+    def __init__(self, master, cfg: dict):
+        super().__init__(master)
+        self.title("Configuración")
+        self.resizable(False, False)
+        self.cfg = cfg
+
+        nb = ttk.Notebook(self)
+        nb.pack(fill=tk.BOTH, expand=True, padx=12, pady=12)
+
+        # --- Pestaña General ---
+        f_gen = ttk.Frame(nb)
+        nb.add(f_gen, text="General")
+        ttk.Label(f_gen, text="OnCalendar (systemd):").grid(row=0, column=0, sticky="w", pady=(8,2))
+        self.var_oncal = tk.StringVar(value=self.cfg["general"].get("oncalendar","*-*-* 02:00:00"))
+        ttk.Entry(f_gen, textvariable=self.var_oncal, width=28).grid(row=0, column=1, sticky="w", padx=6, pady=(8,2))
+
+        # --- Pestaña Audio ---
+        f_audio = ttk.Frame(nb)
+        nb.add(f_audio, text="Audio")
+        self.var_fs = tk.IntVar(value=int(self.cfg["audio"].get("fs", 48000)))
+        self.var_dur = tk.DoubleVar(value=float(self.cfg["audio"].get("duration_s", 10.0)))
+        self.var_pref = tk.StringVar(value=str(self.cfg["audio"].get("prefer_input_name","")))
+        ttk.Label(f_audio, text="Sample rate (Hz):").grid(row=0, column=0, sticky="w", pady=(8,2))
+        ttk.Entry(f_audio, textvariable=self.var_fs, width=10).grid(row=0, column=1, sticky="w", padx=6, pady=(8,2))
+        ttk.Label(f_audio, text="Duración (s):").grid(row=1, column=0, sticky="w", pady=2)
+        ttk.Entry(f_audio, textvariable=self.var_dur, width=10).grid(row=1, column=1, sticky="w", padx=6, pady=2)
+        ttk.Label(f_audio, text="Preferir dispositivo con nombre:").grid(row=2, column=0, sticky="w", pady=2)
+        ttk.Entry(f_audio, textvariable=self.var_pref, width=28).grid(row=2, column=1, sticky="w", padx=6, pady=2)
+
+        # --- Pestaña ThingsBoard ---
+        f_tb = ttk.Frame(nb)
+        nb.add(f_tb, text="ThingsBoard")
+        self.var_host = tk.StringVar(value=self.cfg["thingsboard"].get("host","thingsboard.cloud"))
+        self.var_port = tk.IntVar(value=int(self.cfg["thingsboard"].get("port",1883)))
+        self.var_tls  = tk.BooleanVar(value=bool(self.cfg["thingsboard"].get("use_tls", False)))
+        self.var_token = tk.StringVar(value=self.cfg["thingsboard"].get("token",""))
+        ttk.Label(f_tb, text="Host:").grid(row=0, column=0, sticky="w", pady=(8,2))
+        ttk.Entry(f_tb, textvariable=self.var_host, width=28).grid(row=0, column=1, sticky="w", padx=6, pady=(8,2))
+        ttk.Label(f_tb, text="Port:").grid(row=1, column=0, sticky="w", pady=2)
+        ttk.Entry(f_tb, textvariable=self.var_port, width=10).grid(row=1, column=1, sticky="w", padx=6, pady=2)
+        ttk.Checkbutton(f_tb, text="Usar TLS (8883)", variable=self.var_tls).grid(row=2, column=1, sticky="w", padx=6, pady=2)
+        ttk.Label(f_tb, text="Token:").grid(row=3, column=0, sticky="w", pady=2)
+        # Mostramos el token sin asteriscos (sin show="*")
+        ttk.Entry(f_tb, textvariable=self.var_token, width=40).grid(row=3, column=1, sticky="w", padx=6, pady=2)
+
+        # --- NUEVA pestaña: Pista de referencia ---
+        f_ref = ttk.Frame(nb)
+        nb.add(f_ref, text="Pista de referencia")
+
+        # ruta actual (si no existe, se muestra el default)
+        default_ref = str((ASSETS_DIR / "reference_master.wav").resolve())
+        current_ref = self.cfg["reference"].get("file", default_ref)
+        self.var_ref_path = tk.StringVar(value=current_ref)
+
+        ttk.Label(f_ref, text="La pista de referencia se guardará en:").grid(row=0, column=0, columnspan=2, sticky="w", pady=(8,2))
+        self.entry_ref = ttk.Entry(f_ref, textvariable=self.var_ref_path, width=50, state="readonly")
+        self.entry_ref.grid(row=1, column=0, columnspan=2, sticky="w", padx=6, pady=(0,8))
+
+        ttk.Button(f_ref, text="Grabar referencia ahora", command=self._record_reference_here)\
+            .grid(row=2, column=0, sticky="w", padx=6, pady=6)
+
+        ttk.Label(f_ref, text="(Se grabará con los parámetros de Audio: fs y duración)").grid(row=2, column=1, sticky="w")
+
+        # --- Botonera ---
+        bar = ttk.Frame(self)
+        bar.pack(fill=tk.X, padx=12, pady=(0,12))
+        ttk.Button(bar, text="Cancelar", command=self.destroy).pack(side=tk.RIGHT, padx=6)
+        ttk.Button(bar, text="Guardar", command=self._save).pack(side=tk.RIGHT)
+
+        self.grab_set()
+        self.transient(master)
+
+    def _record_reference_here(self):
+        """Graba y guarda en assets/reference_master.wav (o con timestamp)."""
+        try:
+            fs = int(self.var_fs.get())
+            dur = float(self.var_dur.get())
+
+            # grabación
+            x = record_audio(dur, fs=fs, channels=1)
+
+            # asegura carpeta
+            ASSETS_DIR.mkdir(parents=True, exist_ok=True)
+
+            # nombre fijo (si quieres timestamp, cambia a reference_YYYYmmdd_HHMMSS.wav)
+            out_path = (ASSETS_DIR / "reference_master.wav").resolve()
+            sf.write(str(out_path), x, fs)
+
+            # refleja ruta en UI y en config local (sin guardar a disco aún)
+            self.var_ref_path.set(str(out_path))
+            messagebox.showinfo("Pista de referencia", f"Referencia guardada en:\n{out_path}")
+        except Exception as e:
+            messagebox.showerror("Pista de referencia", f"No se pudo grabar:\n{e}")
+
+    def _save(self):
+        # vuelca valores a cfg y guarda
+        self.cfg["general"]["oncalendar"] = self.var_oncal.get().strip()
+
+        self.cfg["audio"]["fs"] = int(self.var_fs.get())
+        self.cfg["audio"]["duration_s"] = float(self.var_dur.get())
+        self.cfg["audio"]["prefer_input_name"] = self.var_pref.get().strip()
+
+        self.cfg["thingsboard"]["host"] = self.var_host.get().strip()
+        self.cfg["thingsboard"]["port"] = int(self.var_port.get())
+        self.cfg["thingsboard"]["use_tls"] = bool(self.var_tls.get())
+        self.cfg["thingsboard"]["token"] = self.var_token.get()
+
+        self.cfg["reference"]["file"] = self.var_ref_path.get().strip()
+
+        save_config(self.cfg)
+        messagebox.showinfo("Configuración", "Guardado correctamente.")
+        self.destroy()
+
+
+
 # -------------------- main --------------------
 def main():
     root = tb.Window(themename="flatly")
