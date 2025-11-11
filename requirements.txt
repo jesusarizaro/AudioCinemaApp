@@ -1,7 +1,0 @@
-numpy>=1.26
-scipy>=1.11
-sounddevice>=0.4
-soundfile>=0.12
-ttkbootstrap>=1.10
-matplotlib>=3.8
-paho-mqtt>=2.1
