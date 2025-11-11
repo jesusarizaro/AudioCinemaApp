@@ -56,7 +56,6 @@ def pick_input_device(preferred_name_substr: Optional[str] = None) -> Optional[i
     except Exception:
         return None
 
-    # prioridad: índice por variable de entorno
     if ENV_INPUT_INDEX:
         try:
             idx = int(ENV_INPUT_INDEX)
@@ -65,14 +64,12 @@ def pick_input_device(preferred_name_substr: Optional[str] = None) -> Optional[i
         except Exception:
             pass
 
-    # siguiente: substring del nombre
     if preferred_name_substr:
         s = preferred_name_substr.lower()
         for i, d in enumerate(devices):
             if s in str(d.get("name","")).lower() and d.get("max_input_channels",0) > 0:
                 return i
 
-    # último: primer dispositivo con entrada
     for i, d in enumerate(devices):
         if d.get("max_input_channels",0) > 0:
             return i
@@ -122,7 +119,7 @@ class AudioCinemaGUI:
         ensure_dirs()
         self.cfg = load_config()
 
-        # Variables visibles (mostradas en cabecera)
+        # Variables visibles (cabecera)
         self.fs = tk.IntVar(value=int(self._cfg(["audio","fs"], 48000)))
         self.duration = tk.DoubleVar(value=float(self._cfg(["audio","duration_s"], 10.0)))
 
@@ -260,7 +257,7 @@ class AudioCinemaGUI:
             self.msg_text.insert(tk.END, "• " + ln + "\n")
         self.msg_text.see(tk.END)
 
-    # ----------------- acciones (con handlers seguros) -----------------
+    # ----------------- acciones -----------------
     def _auto_select_input_device(self):
         pref = str(self._cfg(["audio","preferred_input_name"], ""))
         self.input_device_index = pick_input_device(pref)
@@ -301,7 +298,7 @@ class AudioCinemaGUI:
         frm = ttk.Frame(w, padding=10); frm.pack(fill=BOTH, expand=True)
         nb = ttk.Notebook(frm); nb.pack(fill=BOTH, expand=True)
 
-        # General
+        # -------- General --------
         g = ttk.Frame(nb); nb.add(g, text="General")
         ref_var = tk.StringVar(value=self._cfg(["reference","wav_path"], str(ASSETS_DIR/"reference_master.wav")))
         oncal_var = tk.StringVar(value=self._cfg(["oncalendar"], "*-*-* 02:00:00"))
@@ -310,7 +307,7 @@ class AudioCinemaGUI:
         ttk.Label(g, text="OnCalendar (systemd):").grid(row=1, column=0, sticky="w", pady=(6,2))
         ttk.Entry(g, textvariable=oncal_var, width=30).grid(row=1, column=1, sticky="w", pady=(6,2))
 
-        # Audio
+        # -------- Audio --------
         a = ttk.Frame(nb); nb.add(a, text="Audio")
         fs_var = tk.IntVar(value=int(self._cfg(["audio","fs"], 48000)))
         dur_var = tk.DoubleVar(value=float(self._cfg(["audio","duration_s"], 10.0)))
@@ -322,7 +319,7 @@ class AudioCinemaGUI:
         ttk.Label(a, text="Preferir dispositivo:").grid(row=2, column=0, sticky="w", pady=(6,2))
         ttk.Entry(a, textvariable=pref_in, width=28).grid(row=2, column=1, sticky="w")
 
-        # ThingsBoard
+        # -------- ThingsBoard --------
         t = ttk.Frame(nb); nb.add(t, text="ThingsBoard")
         host_var = tk.StringVar(value=self._cfg(["thingsboard","host"], "thingsboard.cloud"))
         port_var = tk.IntVar(value=int(self._cfg(["thingsboard","port"], 1883)))
@@ -335,6 +332,36 @@ class AudioCinemaGUI:
         ttk.Checkbutton(t, text="Usar TLS (8883)", variable=tls_var).grid(row=2, column=0, columnspan=2, sticky="w", pady=(6,2))
         ttk.Label(t, text="Token:").grid(row=3, column=0, sticky="w", pady=(6,2))
         ttk.Entry(t, textvariable=token_var, width=40).grid(row=3, column=1, sticky="w")
+
+        # -------- Pista de referencia (nueva) --------
+        r = ttk.Frame(nb); nb.add(r, text="Pista de referencia")
+
+        # valor actual mostrado (solo lectura)
+        ref_path_var = tk.StringVar(value=ref_var.get())
+        ttk.Label(r, text="La pista de referencia se guardará en:").grid(row=0, column=0, columnspan=2, sticky="w", pady=(8,2))
+        ttk.Entry(r, textvariable=ref_path_var, width=50, state="readonly").grid(row=1, column=0, columnspan=2, sticky="w", padx=6, pady=(0,8))
+
+        def _record_reference_here():
+            """Graba y guarda en assets/reference_master.wav con fs/duración actuales."""
+            fs_now = int(fs_var.get())
+            dur_now = float(dur_var.get())
+            # usar mismo dispositivo preferido que la app
+            device_idx = self.input_device_index
+            try:
+                x = record_audio(dur_now, fs=fs_now, channels=1, device=device_idx)
+                ASSETS_DIR.mkdir(parents=True, exist_ok=True)
+                out = (ASSETS_DIR / "reference_master.wav").resolve()
+                sf.write(str(out), x, fs_now)
+                # reflejar en UI de la pestaña y en General
+                ref_path_var.set(str(out))
+                ref_var.set(str(out))
+                messagebox.showinfo("Pista de referencia", f"Referencia guardada en:\n{out}")
+            except Exception as e:
+                messagebox.showerror("Pista de referencia", f"No se pudo grabar:\n{e}")
+
+        ttk.Button(r, text="Grabar referencia ahora", command=_record_reference_here)\
+            .grid(row=2, column=0, sticky="w", padx=6, pady=6)
+        ttk.Label(r, text="(Se usará el fs y la duración configurados arriba)").grid(row=2, column=1, sticky="w")
 
         # Barra guardar/cancelar
         btns = ttk.Frame(frm); btns.pack(fill=X, pady=(10,0))
@@ -360,7 +387,6 @@ class AudioCinemaGUI:
         tb.Button(btns, text="Guardar", bootstyle=PRIMARY, command=on_save).pack(side=RIGHT)
         tb.Button(btns, text="Cancelar", bootstyle=SECONDARY, command=w.destroy).pack(side=RIGHT, padx=(0,6))
 
-        # modal amigable
         try:
             w.grab_set()
             w.transient(self.root)
@@ -380,7 +406,7 @@ class AudioCinemaGUI:
             raise FileNotFoundError(f"No existe archivo de referencia:\n{ref_path}")
 
         x_ref, fs_ref = sf.read(ref_path, dtype="float32", always_2d=False)
-        if x_ref.ndim == 2:
+        if getattr(x_ref, "ndim", 1) == 2:
             x_ref = x_ref.mean(axis=1)
         x_ref = normalize_mono(x_ref)
         if fs_ref != fs:
