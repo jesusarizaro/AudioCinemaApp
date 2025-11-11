@@ -9,10 +9,6 @@ def main():
     print(f"✅ Config encontrada: {CFG_DIR/'config.yaml'}")
     REP_DIR.mkdir(parents=True, exist_ok=True)
     print("✅ Directorios de datos creados.")
-    if not Path(cfg["reference"]["wav_path"]).exists():
-        print("⚠️  Falta el archivo de referencia definido en config.reference.wav_path")
-    else:
-        print("✅ Archivo de referencia OK.")
 
 if __name__ == "__main__":
     main()
