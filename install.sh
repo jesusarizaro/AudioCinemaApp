@@ -2,64 +2,51 @@
 set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "$0")" && pwd)"
-REQ="${APP_DIR}/requirements.txt"
-PY="${APP_DIR}/venv/bin/python"
-PIP="${APP_DIR}/venv/bin/pip"
-USER_NAME="${USER}"
-PNG_SRC="${APP_DIR}/assets/audiocinema.png"
-ICO_DST="${APP_DIR}/assets/audiocinema.ico"
+CFG="${APP_DIR}/config/config.yaml"
 
-echo "[1/3] Creando entorno Python…"
-# Dependencias del sistema necesarias para GUI/audio/numpy/matplotlib
-sudo apt update
-sudo apt install -y \
-  libportaudio2 libsndfile1 ffmpeg \
-  python3-tk tk fonts-dejavu-core \
-  imagemagick
-
-command -v python3 >/dev/null || { echo "Python3 no encontrado"; exit 1; }
-python3 -m venv "${APP_DIR}/venv"
-"${PIP}" install --upgrade pip wheel
-"${PIP}" install -r "${REQ}"
-
-echo "[2/3] Generando instalador (iconos, menú y systemd)…"
-# ICO opcional
-if command -v convert >/dev/null 2>&1 && [ -f "${PNG_SRC}" ]; then
-  convert "${PNG_SRC}" "${ICO_DST}" || true
+# Detectar venv python real
+if [[ -x "${APP_DIR}/venv/bin/python" ]]; then
+  PY="${APP_DIR}/venv/bin/python"
+else
+  # fallback al python3 del sistema
+  PY="$(command -v python3)"
 fi
 
-# Iconos del sistema
-sudo mkdir -p /usr/share/pixmaps
-[ -f "${PNG_SRC}" ] && sudo cp "${PNG_SRC}" /usr/share/pixmaps/audiocinema.png
-mkdir -p "${HOME}/.local/share/icons/hicolor/256x256/apps"
-[ -f "${PNG_SRC}" ] && cp "${PNG_SRC}" "${HOME}/.local/share/icons/hicolor/256x256/apps/audiocinema.png"
-update-icon-theme 2>/dev/null || true
-sudo update-icon-caches /usr/share/icons/hicolor 2>/dev/null || true
+USER_NAME="${USER}"
 
-# Entrada de menú
-mkdir -p "${HOME}/.local/share/applications"
-cat > "${HOME}/.local/share/applications/audiocinema.desktop" <<EOF
-[Desktop Entry]
-Type=Application
-Name=AudioCinema
-Comment=Analizador de sonido para salas de cine
-Exec=${PY} ${APP_DIR}/src/gui_app.py
-Icon=audiocinema
-Terminal=false
-Categories=AudioVideo;Utility;
-StartupNotify=true
-StartupWMClass=AudioCinema
-EOF
-update-desktop-database "${HOME}/.local/share/applications" 2>/dev/null || true
+# Leer OnCalendar del YAML (línea 'oncalendar:' a la derecha)
+if [[ -f "$CFG" ]]; then
+  ONCAL=$(awk -F: '/^oncalendar:/ {gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2}' "$CFG")
+fi
+# Valor por defecto si viene vacío
+if [[ -z "${ONCAL:-}" ]]; then
+  ONCAL="*-*-* 02:00:00"
+fi
 
-# Setup mínimo
-"${PY}" "${APP_DIR}/src/main.py" --setup || true
+echo "[1/3] Generando unidades…"
+mkdir -p "${APP_DIR}/systemd"
 
-echo "[3/3] Verificación…"
-"${PY}" "${APP_DIR}/src/doctor.py" || true
+sed -e "s#__APP_DIR__#${APP_DIR}#g" \
+    -e "s#__PY__#${PY}#g" \
+    -e "s#__USER__#${USER_NAME}#g" \
+    "${APP_DIR}/systemd/audiocinema.service" > "${APP_DIR}/systemd/.gen.audiocinema.service"
 
-echo "
-✅ Instalación lista.
-Siga la siguiente ruta para abrir el programa AudioCinema:
-• Menú → Sonido y Video → AudioCinema
-"
+sed -e "s#__ONCALENDAR__#${ONCAL}#g" \
+    "${APP_DIR}/systemd/audiocinema.timer" > "${APP_DIR}/systemd/.gen.audiocinema.timer"
+
+echo "[2/3] Instalando y habilitando…"
+sudo cp "${APP_DIR}/systemd/.gen.audiocinema.service" /etc/systemd/system/audiocinema.service
+sudo cp "${APP_DIR}/systemd/.gen.audiocinema.timer"   /etc/systemd/system/audiocinema.timer
+sudo systemctl daemon-reload
+sudo systemctl enable audiocinema.timer
+sudo systemctl restart audiocinema.timer
+
+echo "[3/3] Estado:"
+systemctl status audiocinema.timer --no-pager || true
+echo
+echo "Timers:"
+systemctl list-timers audiocinema.timer --all || true
+
+echo
+echo "✅ Listo. Si cambias la hora en Configuración, vuelve a ejecutar:"
+echo "   bash install_systemd.sh"
