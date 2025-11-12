@@ -2,51 +2,83 @@
 set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "$0")" && pwd)"
-CFG="${APP_DIR}/config/config.yaml"
+VENV="${APP_DIR}/venv"
+PY="${VENV}/bin/python"
+PIP="${VENV}/bin/pip"
+PNG_SRC="${APP_DIR}/assets/audiocinema.png"
 
-# Detectar venv python real
-if [[ -x "${APP_DIR}/venv/bin/python" ]]; then
-  PY="${APP_DIR}/venv/bin/python"
-else
-  # fallback al python3 del sistema
-  PY="$(command -v python3)"
+echo "[1/3] Preparando entorno…"
+command -v python3 >/dev/null || { echo "Python3 no encontrado"; exit 1; }
+python3 -m venv "$VENV"
+"$PIP" -q install --upgrade pip wheel
+[ -f "${APP_DIR}/requirements.txt" ] && "$PIP" -q install -r "${APP_DIR}/requirements.txt" || true
+
+echo "[2/3] Lanzador…"
+# Copia de iconos (usuario y sistema si hay sudo)
+mkdir -p "${HOME}/.local/share/icons/hicolor/256x256/apps"
+[ -f "$PNG_SRC" ] && cp "$PNG_SRC" "${HOME}/.local/share/icons/hicolor/256x256/apps/audiocinema.png" || true
+if command -v sudo >/dev/null 2>&1; then
+  sudo mkdir -p /usr/share/pixmaps
+  [ -f "$PNG_SRC" ] && sudo cp "$PNG_SRC" /usr/share/pixmaps/audiocinema.png || true
 fi
 
-USER_NAME="${USER}"
+# Wrapper ejecutable que arranca la app (activa venv y lanza GUI)
+cat > "${APP_DIR}/run_gui.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+APP_DIR="$(cd "$(dirname "$0")" && pwd)"
+exec "${APP_DIR}/venv/bin/python" "${APP_DIR}/src/gui_app.py"
+EOF
+chmod +x "${APP_DIR}/run_gui.sh"
 
-# Leer OnCalendar del YAML (línea 'oncalendar:' a la derecha)
-if [[ -f "$CFG" ]]; then
-  ONCAL=$(awk -F: '/^oncalendar:/ {gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2}' "$CFG")
+# .desktop para el usuario (si hay sudo se instala también a nivel sistema)
+USR_DESKTOP="${HOME}/.local/share/applications/AudioCinema.desktop"
+mkdir -p "$(dirname "$USR_DESKTOP")"
+cat > "$USR_DESKTOP" <<EOF
+[Desktop Entry]
+Type=Application
+Name=AudioCinema
+Comment=Analizador de audio (grabación, evaluación y envío a ThingsBoard)
+TryExec=${APP_DIR}/run_gui.sh
+Exec=${APP_DIR}/run_gui.sh
+Icon=audiocinema
+Terminal=false
+Categories=AudioVideo;Utility;
+StartupWMClass=AudioCinema
+X-AppImage-Integrate=false
+EOF
+
+# Lanzador global opcional (requiere sudo)
+if command -v sudo >/dev/null 2>&1; then
+  SYS_DESKTOP="/usr/share/applications/audiocinema.desktop"
+  sudo bash -c "cat > '$SYS_DESKTOP' <<EOF
+[Desktop Entry]
+Type=Application
+Name=AudioCinema
+Comment=Analizador de audio (grabación, evaluación y envío a ThingsBoard)
+TryExec=${APP_DIR}/run_gui.sh
+Exec=${APP_DIR}/run_gui.sh
+Icon=audiocinema
+Terminal=false
+Categories=AudioVideo;Utility;
+StartupWMClass=AudioCinema
+X-AppImage-Integrate=false
+EOF"
 fi
-# Valor por defecto si viene vacío
-if [[ -z "${ONCAL:-}" ]]; then
-  ONCAL="*-*-* 02:00:00"
-fi
 
-echo "[1/3] Generando unidades…"
-mkdir -p "${APP_DIR}/systemd"
+# Actualiza cachés de iconos/menú (ignorar si no existen)
+update-desktop-database "${HOME}/.local/share/applications" >/dev/null 2>&1 || true
+sudo update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
+update-icon-caches "${HOME}/.local/share/icons/hicolor" >/dev/null 2>&1 || true
+sudo update-icon-caches /usr/share/icons/hicolor >/dev/null 2>&1 || true
 
-sed -e "s#__APP_DIR__#${APP_DIR}#g" \
-    -e "s#__PY__#${PY}#g" \
-    -e "s#__USER__#${USER_NAME}#g" \
-    "${APP_DIR}/systemd/audiocinema.service" > "${APP_DIR}/systemd/.gen.audiocinema.service"
+echo "[3/3] Verificación…"
+"${PY}" - <<'PY'
+print("✓ Python OK")
+PY
 
-sed -e "s#__ONCALENDAR__#${ONCAL}#g" \
-    "${APP_DIR}/systemd/audiocinema.timer" > "${APP_DIR}/systemd/.gen.audiocinema.timer"
-
-echo "[2/3] Instalando y habilitando…"
-sudo cp "${APP_DIR}/systemd/.gen.audiocinema.service" /etc/systemd/system/audiocinema.service
-sudo cp "${APP_DIR}/systemd/.gen.audiocinema.timer"   /etc/systemd/system/audiocinema.timer
-sudo systemctl daemon-reload
-sudo systemctl enable audiocinema.timer
-sudo systemctl restart audiocinema.timer
-
-echo "[3/3] Estado:"
-systemctl status audiocinema.timer --no-pager || true
-echo
-echo "Timers:"
-systemctl list-timers audiocinema.timer --all || true
-
-echo
-echo "✅ Listo. Si cambias la hora en Configuración, vuelve a ejecutar:"
-echo "   bash install_systemd.sh"
+echo "
+✅ Instalación lista.
+Siga la siguiente ruta para abrir el programa AudioCinema:
+• Menú → Sonido y Video → AudioCinema
+"
