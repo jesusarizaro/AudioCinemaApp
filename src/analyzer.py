@@ -200,39 +200,64 @@ def relative_spectrum_db(f_ref, psd_ref_db, f_x, psd_x_db):
     psd_x_i = np.interp(f_ref, f_x, psd_x_db)
     return f_ref, psd_x_i - psd_ref_db
 
-def analyze_pair(x_ref: np.ndarray, x_cur: np.ndarray, fs: int) -> dict:
+def analyze_pair(x_ref: np.ndarray, x_cur: np.ndarray, fs: int, level="Medio") -> dict:
+    # Tolerancias según nivel
+    if level == "Bajo":
+        tol_rms = 6.0
+        tol_band = 8.0
+        tol_crest = 6.0
+        tol_spec = 18.0
+    elif level == "Alto":
+        tol_rms = 1.5
+        tol_band = 3.0
+        tol_crest = 2.5
+        tol_spec = 8.0
+    else:  # Medio
+        tol_rms = 3.0
+        tol_band = 5.0
+        tol_crest = 4.0
+        tol_spec = 12.0
+
     rms_ref, rms_cur = rms_db(x_ref), rms_db(x_cur)
     crest_ref, crest_cur = crest_factor_db(x_ref), crest_factor_db(x_cur)
+
     f_ref, psd_ref_db = welch_db(x_ref, fs)
     f_cur, psd_cur_db = welch_db(x_cur, fs)
+
     f_rel, rel_db = relative_spectrum_db(f_ref, psd_ref_db, f_cur, psd_cur_db)
+
     bands_ref = {k: band_energy_db(f_ref, psd_ref_db, v) for k, v in BANDS.items()}
     bands_cur = {k: band_energy_db(f_cur, psd_cur_db, v) for k, v in BANDS.items()}
+    diff_bands = {k: (bands_cur[k] - bands_ref[k]) for k in BANDS}
+
     diff_rms = rms_cur - rms_ref
     diff_crest = crest_cur - crest_ref
-    diff_bands = {k: (bands_cur[k] - bands_ref[k]) for k in BANDS}
-    dead_channel = (rms_cur < (rms_ref - 10.0))
+
     mask = (f_rel >= 50.0) & (f_rel <= 8000.0)
     rel_abs = np.abs(rel_db[mask]) if np.any(mask) else np.abs(rel_db)
-    spec_dev95 = float(np.percentile(rel_abs, 95)) if rel_abs.size else 0.0
-    band_fail  = any(abs(v) > 6.0 for v in diff_bands.values())
-    crest_fail = abs(diff_crest) > 4.0
-    spec_fail  = spec_dev95 > 12.0
-    rms_fail   = diff_rms < -10.0
-    any_fail = dead_channel or band_fail or crest_fail or spec_fail or rms_fail
+    spec_dev95 = float(np.percentile(rel_abs, 95))
+
+    fail_rms = abs(diff_rms) > tol_rms
+    fail_band = any(abs(v) > tol_band for v in diff_bands.values())
+    fail_crest = abs(diff_crest) > tol_crest
+    fail_spec = spec_dev95 > tol_spec
+
+    failed = fail_rms or fail_band or fail_crest or fail_spec
+    overall = "FAILED" if failed else "PASSED"
+
     return {
-        "fs": fs,
-        "rms_ref": rms_ref, "rms_cur": rms_cur,
-        "crest_ref": crest_ref, "crest_cur": crest_cur,
-        "diff_rms": diff_rms, "diff_crest": diff_crest,
+        "overall": overall,
+        "rms_ref": rms_ref, "rms_cur": rms_cur, "diff_rms": diff_rms,
+        "crest_ref": crest_ref, "crest_cur": crest_cur, "diff_crest": diff_crest,
         "bands_ref": bands_ref, "bands_cur": bands_cur, "diff_bands": diff_bands,
         "f_ref": f_ref, "psd_ref_db": psd_ref_db,
         "f_cur": f_cur, "psd_cur_db": psd_cur_db,
         "f_rel": f_rel, "rel_db": rel_db,
         "spec_dev95": spec_dev95,
-        "dead_channel": dead_channel,
-        "overall": ("PASSED" if not any_fail else "FAILED"),
+        "dead_channel": rms_cur < (rms_ref - 10),
+        "level": level
     }
+
 
 # ===================== JSON =====================
 
