@@ -463,7 +463,9 @@ class AudioCinemaGUI:
         x_cur = record_audio(dur, fs=fs, channels=1, device=self.input_device_index)
 
         # 3) analizar
-        res = analyze_pair(x_ref, x_cur, fs)
+        eval_level = self._cfg(["evaluation", "level"], "Medio")
+        res = analyze_pair(x_ref, x_cur, fs, level=eval_level)
+
         self._set_eval(res["overall"] == "PASSED")
 
         # 4) beeps/segments para JSON
