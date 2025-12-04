@@ -341,6 +341,41 @@ class AudioCinemaGUI:
         ttk.Label(r, text="La pista de referencia se guardará en:").grid(row=0, column=0, columnspan=2, sticky="w", pady=(8,2))
         ttk.Entry(r, textvariable=ref_path_var, width=50, state="readonly").grid(row=1, column=0, columnspan=2, sticky="w", padx=6, pady=(0,8))
 
+        # -------- Evaluación --------
+        ev = ttk.Frame(nb); nb.add(ev, text="Evaluación")
+
+        eval_levels = ["Bajo", "Medio", "Alto"]
+        eval_var = tk.StringVar(value=self._cfg(["evaluation", "level"], "Medio"))
+
+        ttk.Label(ev, text="Criterios de evaluación:").grid(row=0, column=0, sticky="w", pady=(6,2))
+        ttk.Combobox(ev, textvariable=eval_var, values=eval_levels, state="readonly", width=10)\
+            .grid(row=0, column=1, sticky="w")
+
+        ttk.Label(ev, text="Define qué tan estricta será la evaluación del sistema").grid(
+            row=1, column=0, columnspan=2, sticky="w", pady=(4,10)
+        )
+
+        # -------- Frecuencias de grabación --------
+        fr = ttk.Frame(nb); nb.add(fr, text="Frecuencias de grabación")
+
+        trig_enabled = tk.BooleanVar(value=self._cfg(["trigger","enabled"], False))
+        min_freq_var = tk.DoubleVar(value=self._cfg(["trigger","min_freq"], 80.0))
+        max_freq_var = tk.DoubleVar(value=self._cfg(["trigger","max_freq"], 200.0))
+
+        ttk.Checkbutton(fr, text="Activar grabación por frecuencia", variable=trig_enabled)\
+            .grid(row=0, column=0, columnspan=2, sticky="w", pady=(6,2))
+
+        ttk.Label(fr, text="Frecuencia mínima (Hz):").grid(row=1, column=0, sticky="w", pady=(6,2))
+        ttk.Entry(fr, textvariable=min_freq_var, width=10).grid(row=1, column=1, sticky="w")
+
+        ttk.Label(fr, text="Frecuencia máxima (Hz):").grid(row=2, column=0, sticky="w", pady=(6,2))
+        ttk.Entry(fr, textvariable=max_freq_var, width=10).grid(row=2, column=1, sticky="w")
+
+        ttk.Label(fr, text="El sistema grabará únicamente cuando detecte energía dentro de este rango").grid(
+            row=3, column=0, columnspan=2, sticky="w", pady=(8,2)
+        )
+
+        
         def _record_reference_here():
             """Graba y guarda en assets/reference_master.wav con fs/duración actuales."""
             fs_now = int(fs_var.get())
@@ -375,6 +410,15 @@ class AudioCinemaGUI:
             self._set_cfg(["thingsboard","port"], int(port_var.get()))
             self._set_cfg(["thingsboard","use_tls"], bool(tls_var.get()))
             self._set_cfg(["thingsboard","token"], token_var.get().strip())
+
+            # Evaluación
+            self._set_cfg(["evaluation", "level"], eval_var.get())
+
+            # Disparo por frecuencia
+            self._set_cfg(["trigger", "enabled"], bool(trig_enabled.get()))
+            self._set_cfg(["trigger", "min_freq"], float(min_freq_var.get()))
+            self._set_cfg(["trigger", "max_freq"], float(max_freq_var.get()))
+
             save_config(self.cfg)
 
             # sincroniza cabecera
