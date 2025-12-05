@@ -92,6 +92,33 @@ def ui_action(fn):
             return None
     return wrapper
 
+def get_next_timer_run(timer_name: str = "audiocinema.timer") -> str:
+    """
+    Devuelve el campo NEXT de `systemctl list-timers <timer_name> --all`
+    como texto legible. Si no se encuentra, devuelve un mensaje genérico.
+    """
+    try:
+        out = subprocess.check_output(
+            ["systemctl", "list-timers", timer_name, "--all"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+        lines = [ln for ln in out.splitlines() if ln.strip()]
+        if len(lines) < 2:
+            return "No programado"
+
+        # La segunda línea suele ser la del timer
+        data_line = lines[1].strip()
+        # Columnas separadas por 2+ espacios
+        cols = re.split(r"\s{2,}", data_line)
+        if not cols:
+            return data_line
+
+        # Columna 0 = campo NEXT completo (fecha, hora, zona)
+        return cols[0]
+    except Exception:
+        return "No disponible"
+
 
 class AudioCinemaGUI:
     def __init__(self, root: tb.Window):
@@ -129,6 +156,8 @@ class AudioCinemaGUI:
         self.input_device_index: Optional[int] = None
         self.test_name = tk.StringVar(value="—")
         self.eval_text = tk.StringVar(value="—")
+        self.next_eval = tk.StringVar(value="—")
+
 
         # buffers de ondas últimas
         self.last_ref: Optional[np.ndarray] = None
@@ -143,6 +172,8 @@ class AudioCinemaGUI:
 
         self._build_ui()
         self._auto_select_input_device()
+        self._update_next_eval_label()
+
 
     # --- helpers cfg seguros ---
     def _cfg(self, path: List[str], default: Any = None) -> Any:
@@ -205,9 +236,26 @@ class AudioCinemaGUI:
         e = ttk.Entry(header, textvariable=self.test_name, width=32, state="readonly", justify="center")
         e.grid(row=0, column=1, sticky="w")
 
-        ttk.Label(header, text="EVALUACIÓN:", font=("Segoe UI", 10, "bold")).grid(row=1, column=0, sticky="w", padx=(0,6), pady=(6,0))
-        self.eval_lbl = ttk.Label(header, textvariable=self.eval_text, font=("Segoe UI", 11, "bold"), foreground="#333")
-        self.eval_lbl.grid(row=1, column=1, sticky="w", pady=(6,0))
+        # RESULTADO (antes: EVALUACIÓN)
+        ttk.Label(header, text="RESULTADO:", font=("Segoe UI", 10, "bold")).grid(
+            row=1, column=0, sticky="w", padx=(0, 6), pady=(6, 0)
+        )
+        self.eval_lbl = ttk.Label(
+            header, textvariable=self.eval_text,
+            font=("Segoe UI", 11, "bold"), foreground="#333"
+        )
+        self.eval_lbl.grid(row=1, column=1, sticky="w", pady=(6, 0))
+        
+        # PRÓXIMA EVALUACIÓN (lee el timer de systemd)
+        ttk.Label(header, text="PRÓXIMA EVALUACIÓN:", font=("Segoe UI", 10, "bold")).grid(
+            row=2, column=0, sticky="w", padx=(0, 6), pady=(6, 0)
+        )
+        self.next_eval_lbl = ttk.Label(
+            header, textvariable=self.next_eval,
+            font=("Segoe UI", 10), foreground="#333"
+        )
+        self.next_eval_lbl.grid(row=2, column=1, sticky="w", pady=(6, 0))
+
 
         fig_card = ttk.Frame(right, padding=4)
         fig_card.pack(fill=BOTH, expand=True)
@@ -259,6 +307,10 @@ class AudioCinemaGUI:
         for ln in lines:
             self.msg_text.insert(tk.END, "• " + ln + "\n")
         self.msg_text.see(tk.END)
+
+    def _update_next_eval_label(self):
+    """Actualiza la etiqueta 'PRÓXIMA EVALUACIÓN' leyendo el timer de systemd."""
+    self.next_eval.set(get_next_timer_run("audiocinema.timer"))
 
     # ----------------- acciones -----------------
     def _auto_select_input_device(self):
@@ -427,6 +479,9 @@ class AudioCinemaGUI:
             # sincroniza cabecera
             self.fs.set(int(self._cfg(["audio","fs"], 48000)))
             self.duration.set(float(self._cfg(["audio","duration_s"], 10.0)))
+
+            # 🔄 🔄 🔄 ACTUALIZAR PRÓXIMA EVALUACIÓN AQUÍ
+            self._update_next_eval_label()
 
             messagebox.showinfo(APP_NAME, "Configuración guardada.")
             w.destroy()
