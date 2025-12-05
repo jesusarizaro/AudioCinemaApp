@@ -6,6 +6,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Tuple, Any
 
+import subprocess
+import re
+
 import tkinter as tk
 from tkinter import ttk, messagebox
 import ttkbootstrap as tb
